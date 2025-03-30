@@ -1,0 +1,9 @@
+# ダウンロードされたPDFと履歴ファイル
+downloads/
+downloaded_history.pkl
+
+# ログファイル
+*.log
+
+# Python関連
+__pycache__/
