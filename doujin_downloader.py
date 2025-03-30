@@ -46,8 +46,8 @@ def save_download_history(history):
         pickle.dump(history, f)
 
 def clean_filename(filename):
-    """ファイル名に使えない文字を除去する"""
-    return re.sub(r'[\\/*?:"<>|]', '', filename)
+    """ファイル名に使えない文字を半角スペースに置き換える"""
+    return re.sub(r'[\\/*?:"<>|]', ' ', filename)
 
 def get_today_items():
     """今日の更新アイテムのURLを取得する"""
