@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import pickle
+from datetime import datetime
 
 # ロギングの設定
 logging.basicConfig(
@@ -19,7 +20,7 @@ logging.basicConfig(
 
 # 設定
 BASE_URL = 'https://ddd-smart.net'
-HISTORY_URL = 'https://ddd-smart.net/history.php'
+TOP_URL = 'https://ddd-smart.net/top-zXJd94'  # トップページを使用
 DOWNLOAD_DIR = 'downloads'  # ダウンロードディレクトリ
 HISTORY_FILE = 'downloaded_history.pkl'  # ダウンロード履歴ファイル
 
@@ -55,22 +56,79 @@ def clean_filename(filename):
 def get_today_items():
     """今日の更新アイテムのURLを取得する"""
     try:
-        logging.info("更新ページにアクセスしています...")
-        response = session.get(HISTORY_URL)
+        logging.info("トップページにアクセスしています...")
+        response = session.get(TOP_URL)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        items = []
-        # 最新の更新セクションを探す - リスト表示されている項目を取得
-        today_items = soup.select('div.list-all ul.package-list li a.pop_separate')
+        # 今日の日付を取得 (YYYYMMDD形式)
+        today_date = datetime.now().strftime('%Y%m%d')
+        today_formatted = datetime.now().strftime('%Y年%m月%d日')
+        logging.info(f"今日の日付: {today_date}")
+        logging.info(f"検索する日付形式: {today_formatted}")
         
-        for item in today_items:
-            href = item.get('href')
-            if href and '/doujinshi3/show-m.php' in href:
-                full_url = urljoin(BASE_URL, href)
-                items.append(full_url)
+        items = []
+        
+        # 正確なクラス名でh2ヘッダーを検索
+        headers = soup.find_all('h2', class_='card-panel white-text blue accent-2')
+        logging.info(f"見つかったヘッダー数: {len(headers)}")
+        
+        today_header = None
+        for i, header in enumerate(headers):
+            header_text = header.get_text().strip()
+            logging.info(f"ヘッダー{i+1}: '{header_text}'")
+            if today_formatted in header_text and '更新同人誌' in header_text:
+                today_header = header
+                logging.info(f"今日の更新セクションを発見: {header_text}")
+                break
+        
+        if today_header:
+            # 今日の更新セクション内の項目を取得
+            # ヘッダーの後の div.list-all を探す
+            current_element = today_header
+            while current_element:
+                current_element = current_element.find_next_sibling()
+                if current_element and current_element.name == 'div':
+                    if 'list-all' in current_element.get('class', []):
+                        today_items = current_element.select('ul.package-list li a.pop_separate')
+                        logging.info(f"今日の更新セクション内でリンクを{len(today_items)}件発見")
+                        
+                        for item in today_items:
+                            href = item.get('href')
+                            if href and '/doujinshi3/show-m.php' in href:
+                                full_url = urljoin(BASE_URL, href)
+                                items.append(full_url)
+                                logging.info(f"今日の更新URLを追加: {full_url}")
+                        break
+                elif current_element and current_element.name == 'h2':
+                    # 次のセクションに到達したら終了
+                    break
+        
+        # セクションが見つからない場合は、トップページから今日の日付を含むURLを検索
+        if not items:
+            logging.info("セクション検索で見つからないため、今日の日付でフィルタリングして検索します...")
+            all_links = soup.select('a.pop_separate[href*="/doujinshi3/show-m.php"]')
+            logging.info(f"全体で{len(all_links)}件のリンクを発見")
+            
+            # 最初の10件のURLをデバッグ用に表示
+            for i, item in enumerate(all_links[:10]):
+                href = item.get('href')
+                logging.info(f"URL例{i+1}: {href}")
+            
+            for item in all_links:
+                href = item.get('href')
+                if href and f'g={today_date}' in href:
+                    full_url = urljoin(BASE_URL, href)
+                    items.append(full_url)
+                    logging.info(f"今日の日付のURLを発見: {full_url}")
+        
+        # 重複を除去
+        items = list(set(items))
         
         logging.info(f'今日の更新アイテム: {len(items)}件')
+        for i, item in enumerate(items[:5]):
+            logging.info(f'  {i+1}. {item}')
+            
         return items
     except Exception as e:
         logging.error(f'今日の更新アイテム取得エラー: {e}')
