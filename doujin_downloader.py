@@ -20,7 +20,7 @@ logging.basicConfig(
 
 # 設定
 BASE_URL = 'https://ddd-smart.net'
-TOP_URL = 'https://ddd-smart.net/top-zXJd94'  # トップページを使用
+TOP_URL = 'https://ddd-smart.net/'  # トップページを使用
 DOWNLOAD_DIR = 'downloads'  # ダウンロードディレクトリ
 HISTORY_FILE = 'downloaded_history.pkl'  # ダウンロード履歴ファイル
 
