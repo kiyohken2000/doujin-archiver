@@ -23,6 +23,7 @@ BASE_URL = 'https://ddd-smart.net'
 TOP_URL = 'https://ddd-smart.net/'  # トップページを使用
 DOWNLOAD_DIR = 'downloads'  # ダウンロードディレクトリ
 HISTORY_FILE = 'downloaded_history.pkl'  # ダウンロード履歴ファイル
+DOWNLOAD_TIMEOUT = 300  # ダウンロードタイムアウト（秒）: 5分
 
 # セッション作成
 session = requests.Session()
@@ -63,7 +64,7 @@ def get_today_items():
         
         # 今日の日付を取得 (YYYYMMDD形式)
         today_date = datetime.now().strftime('%Y%m%d')
-        # today_date = "20250610"
+        # today_date = "20250927"
         today_formatted = datetime.now().strftime('%Y年%m月%d日')
         logging.info(f"今日の日付: {today_date}")
         logging.info(f"検索する日付形式: {today_formatted}")
@@ -286,19 +287,47 @@ def download_pdf(item, dl_page_url):
         filename = generate_filename(item)
         filepath = os.path.join(DOWNLOAD_DIR, filename)
         
-        # PDFをダウンロード
+        # PDFをダウンロード（タイムアウト付き）
         logging.info(f'PDFダウンロード開始: {pdf_url}')
-        pdf_response = session.get(pdf_url, stream=True)
-        pdf_response.raise_for_status()
+        start_time = time.time()
         
-        with open(filepath, 'wb') as f:
-            for chunk in pdf_response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
-        logging.info(f'ダウンロード成功: {filename}')
-        return True
+        try:
+            # タイムアウトを設定してダウンロード開始
+            pdf_response = session.get(pdf_url, stream=True, timeout=30)
+            pdf_response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in pdf_response.iter_content(chunk_size=8192):
+                    # 経過時間をチェック
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > DOWNLOAD_TIMEOUT:
+                        logging.warning(f'ダウンロードタイムアウト ({elapsed_time:.1f}秒経過): {filename}')
+                        logging.warning(f'このファイルをスキップして次のファイルに移ります')
+                        # 不完全なファイルを削除
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                        return False
+                    
+                    f.write(chunk)
+            
+            elapsed_time = time.time() - start_time
+            logging.info(f'ダウンロード成功 ({elapsed_time:.1f}秒): {filename}')
+            return True
+            
+        except requests.exceptions.Timeout:
+            logging.warning(f'接続タイムアウト: {filename}')
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return False
+            
     except Exception as e:
         logging.error(f'ダウンロードエラー ({item["title"]}): {e}')
+        # エラー時に不完全なファイルを削除
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except:
+                pass
         return False
 
 def generate_filename(item):
@@ -323,6 +352,7 @@ def generate_filename(item):
 def main():
     """メイン処理"""
     logging.info('ダウンロード処理を開始します')
+    logging.info(f'ダウンロードタイムアウト: {DOWNLOAD_TIMEOUT}秒 ({DOWNLOAD_TIMEOUT/60:.1f}分)')
     
     # ダウンロード履歴を読み込む
     downloaded_history = load_download_history()
@@ -336,6 +366,7 @@ def main():
     
     # 各アイテムを処理
     new_downloads = 0
+    skipped_items = 0
     for url in today_items:
         # 既にダウンロード済みかチェック
         if url in downloaded_history:
@@ -360,6 +391,8 @@ def main():
         if success:
             downloaded_history.add(url)
             new_downloads += 1
+        else:
+            skipped_items += 1
         
         # サーバーに負荷をかけないように少し待機
         time.sleep(3)
@@ -367,7 +400,7 @@ def main():
     # ダウンロード履歴を保存
     save_download_history(downloaded_history)
     
-    logging.info(f'処理完了: {new_downloads}件の新規ダウンロード')
+    logging.info(f'処理完了: {new_downloads}件の新規ダウンロード, {skipped_items}件スキップ')
 
 if __name__ == '__main__':
     main()
