@@ -64,7 +64,7 @@ def get_today_items():
         
         # 今日の日付を取得 (YYYYMMDD形式)
         today_date = datetime.now().strftime('%Y%m%d')
-        # today_date = "20250927"
+        # today_date = "20251005"
         today_formatted = datetime.now().strftime('%Y年%m月%d日')
         logging.info(f"今日の日付: {today_date}")
         logging.info(f"検索する日付形式: {today_formatted}")
