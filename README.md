@@ -25,7 +25,7 @@
 
 1. **リポジトリのクローン**
    ```bash
-   git clone https://github.com/yourusername/doujin-archiver.git
+   git clone https://github.com/kiyohken2000/doujin-archiver.git
    cd doujin-archiver
    ```
 
