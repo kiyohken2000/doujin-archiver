@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import pickle
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ロギングの設定
 logging.basicConfig(
@@ -24,6 +24,7 @@ TOP_URL = 'https://ddd-smart.net/'  # トップページを使用
 DOWNLOAD_DIR = 'downloads'  # ダウンロードディレクトリ
 HISTORY_FILE = 'downloaded_history.pkl'  # ダウンロード履歴ファイル
 DOWNLOAD_TIMEOUT = 300  # ダウンロードタイムアウト（秒）: 5分
+MAX_RETRY_DAYS = 1  # 最大何日前まで遡るか
 
 # セッション作成
 session = requests.Session()
@@ -54,20 +55,29 @@ def clean_filename(filename):
     # その他の使用できない文字は半角スペースに変換
     return re.sub(r'[\\/*?"<>|]', ' ', filename)
 
-def get_today_items():
-    """今日の更新アイテムのURLを取得する"""
+def get_items_by_date(target_date=None):
+    """指定した日付の更新アイテムのURLを取得する
+    
+    Args:
+        target_date (datetime): 取得したい日付。Noneの場合は今日の日付を使用
+    
+    Returns:
+        tuple: (items list, 実際に使用した日付のdatetime object)
+    """
+    if target_date is None:
+        target_date = datetime.now()
+    
     try:
         logging.info("トップページにアクセスしています...")
         response = session.get(TOP_URL)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 今日の日付を取得 (YYYYMMDD形式)
-        today_date = datetime.now().strftime('%Y%m%d')
-        # today_date = "20251005"
-        today_formatted = datetime.now().strftime('%Y年%m月%d日')
-        logging.info(f"今日の日付: {today_date}")
-        logging.info(f"検索する日付形式: {today_formatted}")
+        # 日付を各種フォーマットで準備
+        date_yyyymmdd = target_date.strftime('%Y%m%d')
+        date_formatted = target_date.strftime('%Y年%m月%d日')
+        logging.info(f"検索対象日付: {date_yyyymmdd}")
+        logging.info(f"検索する日付形式: {date_formatted}")
         
         items = []
         
@@ -75,40 +85,39 @@ def get_today_items():
         headers = soup.find_all('h2', class_='card-panel white-text blue accent-2')
         logging.info(f"見つかったヘッダー数: {len(headers)}")
         
-        today_header = None
+        target_header = None
         for i, header in enumerate(headers):
             header_text = header.get_text().strip()
             logging.info(f"ヘッダー{i+1}: '{header_text}'")
-            if today_formatted in header_text and '更新同人誌' in header_text:
-                today_header = header
-                logging.info(f"今日の更新セクションを発見: {header_text}")
+            if date_formatted in header_text and '更新同人誌' in header_text:
+                target_header = header
+                logging.info(f"{date_formatted}の更新セクションを発見: {header_text}")
                 break
         
-        if today_header:
-            # 今日の更新セクション内の項目を取得
-            # ヘッダーの後の div.list-all を探す
-            current_element = today_header
+        if target_header:
+            # 指定日付の更新セクション内の項目を取得
+            current_element = target_header
             while current_element:
                 current_element = current_element.find_next_sibling()
                 if current_element and current_element.name == 'div':
                     if 'list-all' in current_element.get('class', []):
-                        today_items = current_element.select('ul.package-list li a.pop_separate')
-                        logging.info(f"今日の更新セクション内でリンクを{len(today_items)}件発見")
+                        target_items = current_element.select('ul.package-list li a.pop_separate')
+                        logging.info(f"{date_formatted}の更新セクション内でリンクを{len(target_items)}件発見")
                         
-                        for item in today_items:
+                        for item in target_items:
                             href = item.get('href')
                             if href and '/doujinshi3/show-m.php' in href:
                                 full_url = urljoin(BASE_URL, href)
                                 items.append(full_url)
-                                logging.info(f"今日の更新URLを追加: {full_url}")
+                                logging.info(f"{date_formatted}の更新URLを追加: {full_url}")
                         break
                 elif current_element and current_element.name == 'h2':
                     # 次のセクションに到達したら終了
                     break
         
-        # セクションが見つからない場合は、トップページから今日の日付を含むURLを検索
+        # セクションが見つからない場合は、トップページから指定日付を含むURLを検索
         if not items:
-            logging.info("セクション検索で見つからないため、今日の日付でフィルタリングして検索します...")
+            logging.info(f"セクション検索で見つからないため、{date_yyyymmdd}でフィルタリングして検索します...")
             all_links = soup.select('a.pop_separate[href*="/doujinshi3/show-m.php"]')
             logging.info(f"全体で{len(all_links)}件のリンクを発見")
             
@@ -119,22 +128,22 @@ def get_today_items():
             
             for item in all_links:
                 href = item.get('href')
-                if href and f'g={today_date}' in href:
+                if href and f'g={date_yyyymmdd}' in href:
                     full_url = urljoin(BASE_URL, href)
                     items.append(full_url)
-                    logging.info(f"今日の日付のURLを発見: {full_url}")
+                    logging.info(f"{date_formatted}のURLを発見: {full_url}")
         
         # 重複を除去
         items = list(set(items))
         
-        logging.info(f'今日の更新アイテム: {len(items)}件')
+        logging.info(f'{date_formatted}の更新アイテム: {len(items)}件')
         for i, item in enumerate(items[:5]):
             logging.info(f'  {i+1}. {item}')
             
-        return items
+        return items, target_date
     except Exception as e:
-        logging.error(f'今日の更新アイテム取得エラー: {e}')
-        return []
+        logging.error(f'{date_formatted}の更新アイテム取得エラー: {e}')
+        return [], target_date
 
 def get_dl_page_url(detail_page_url):
     """詳細ページからDLページのURLを取得する"""
@@ -357,17 +366,43 @@ def main():
     # ダウンロード履歴を読み込む
     downloaded_history = load_download_history()
     
-    # 今日の更新アイテムを取得
-    today_items = get_today_items()
+    # 今日から順番に過去の日付を試す
+    items = []
+    used_date = None
     
-    if not today_items:
-        logging.error('今日の更新アイテムが見つかりませんでした')
+    for days_ago in range(MAX_RETRY_DAYS + 1):
+        target_date = datetime.now() - timedelta(days=days_ago)
+        logging.info(f'\n{"="*50}')
+        if days_ago == 0:
+            logging.info(f'今日 ({target_date.strftime("%Y年%m月%d日")}) の更新を検索中...')
+        else:
+            logging.info(f'{days_ago}日前 ({target_date.strftime("%Y年%m月%d日")}) の更新を検索中...')
+        logging.info(f'{"="*50}')
+        
+        items, used_date = get_items_by_date(target_date)
+        
+        if items:
+            logging.info(f'✓ {target_date.strftime("%Y年%m月%d日")}の更新アイテムが見つかりました！')
+            break
+        else:
+            if days_ago == 0:
+                logging.warning(f'今日の更新アイテムが見つかりませんでした。1日前を検索します...')
+            elif days_ago < MAX_RETRY_DAYS:
+                logging.warning(f'{days_ago}日前も見つかりませんでした。{days_ago + 1}日前を検索します...')
+            else:
+                logging.error(f'過去{MAX_RETRY_DAYS}日間の更新アイテムが見つかりませんでした。')
+    
+    if not items:
+        logging.error(f'過去{MAX_RETRY_DAYS}日間の更新アイテムが1つも見つかりませんでした。処理を終了します。')
         return
+    
+    # 処理対象の日付を明示
+    logging.info(f'\n処理対象: {used_date.strftime("%Y年%m月%d日")}の更新アイテム {len(items)}件')
     
     # 各アイテムを処理
     new_downloads = 0
     skipped_items = 0
-    for url in today_items:
+    for url in items:
         # 既にダウンロード済みかチェック
         if url in downloaded_history:
             logging.info(f'スキップ (既にダウンロード済み): {url}')
@@ -400,7 +435,12 @@ def main():
     # ダウンロード履歴を保存
     save_download_history(downloaded_history)
     
-    logging.info(f'処理完了: {new_downloads}件の新規ダウンロード, {skipped_items}件スキップ')
+    logging.info(f'\n{"="*50}')
+    logging.info(f'処理完了サマリー:')
+    logging.info(f'  対象日付: {used_date.strftime("%Y年%m月%d日")}')
+    logging.info(f'  新規ダウンロード: {new_downloads}件')
+    logging.info(f'  スキップ: {skipped_items}件')
+    logging.info(f'{"="*50}')
 
 if __name__ == '__main__':
     main()
